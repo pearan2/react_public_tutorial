@@ -1,17 +1,40 @@
-import { useState } from "react";
+import React, { createContext, useContext, useReducer } from "react";
 import ReactDOM from "react-dom";
-import Counter from "./Counter";
 import "./index.css";
-import ContextProvider from "./ContextProvider";
+
+interface GameStateType {
+  history: Array<Array<string | null>>;
+  xIsNext: boolean;
+  stepNumber: number;
+}
+
+enum ActionTypeType {
+  BOARDCLICK,
+  ROLLBACKCLICK
+}
+
+interface ActionType {
+  type: ActionTypeType;
+  data: number;
+}
 
 interface SquarePropsType {
+  index: number;
   value: string | null;
-  handleClick: () => void;
 }
 
 const Square = (props: SquarePropsType) => {
+  const gamedispatch = useContext(GameDispatchContext);
+
+  const buttonOnClick = () => {
+    gamedispatch({
+      type: ActionTypeType.BOARDCLICK,
+      data: props.index
+    });
+  };
+
   return (
-    <button className="square" onClick={props.handleClick}>
+    <button className="square" onClick={buttonOnClick}>
       {props.value}
     </button>
   );
@@ -19,19 +42,11 @@ const Square = (props: SquarePropsType) => {
 
 interface BoardPropsType {
   squares: Array<string | null>;
-  handleClick: (arg0: number) => void;
 }
 
 const Board = (props: BoardPropsType) => {
   const renderSquare = (i: number) => {
-    return (
-      <Square
-        value={props.squares[i]}
-        handleClick={() => {
-          props.handleClick(i);
-        }}
-      />
-    );
+    return <Square index={i} value={props.squares[i]} />;
   };
 
   return (
@@ -55,69 +70,68 @@ const Board = (props: BoardPropsType) => {
   );
 };
 
-interface GameStateType {
-  history: Array<Array<string | null>>;
-  xIsNext: boolean;
-  stepNumber: number;
-}
+const calculateWinner = (squares: Array<string | null>): string | null => {
+  const lines = [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8],
+    [0, 4, 8],
+    [2, 4, 6]
+  ];
+  for (let i = 0; i < lines.length; i++) {
+    const [a, b, c] = lines[i];
+    if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+      return squares[a];
+    }
+  }
+  return null;
+};
+
+const gameReducer = (
+  state: GameStateType,
+  action: ActionType
+): GameStateType => {
+  switch (action.type) {
+    case ActionTypeType.BOARDCLICK: {
+      const newHistory = state.history.slice(0, state.stepNumber + 1);
+      const newSquares = newHistory[newHistory.length - 1].slice();
+      if (newSquares[action.data] || calculateWinner(newSquares)) return state;
+      newSquares[action.data] = state.xIsNext ? "X" : "O";
+
+      return {
+        history: newHistory.concat([newSquares]),
+        xIsNext: !state.xIsNext,
+        stepNumber: state.stepNumber + 1
+      };
+    }
+    case ActionTypeType.ROLLBACKCLICK: {
+      return {
+        ...state,
+        stepNumber: action.data,
+        xIsNext: action.data % 2 === 0 ? true : false
+      };
+    }
+    default: {
+      throw new Error("unhandled ActionType");
+    }
+  }
+};
+
+const GameDispatchContext = createContext<React.Dispatch<ActionType> | any>(
+  null
+);
 
 const Game = () => {
-  const [gameStatus, setGameStatus] = useState<GameStateType>({
+  const gameStateTypeInit: GameStateType = {
     history: [Array<string | null>(9).fill(null)],
     xIsNext: true,
-    stepNumber: 0,
-  });
-
-  const handleClick = (i: number) => {
-    const nextHistory = gameStatus.history.slice(0, gameStatus.stepNumber + 1);
-    const currentSquares = gameStatus.history[gameStatus.stepNumber];
-    const nextSquares = currentSquares.slice(0);
-
-    if (calculateWinner(currentSquares) || currentSquares[i]) return;
-    nextSquares[i] = gameStatus.xIsNext ? "X" : "O";
-
-    setGameStatus((prevStatus) => {
-      return {
-        history: nextHistory.concat([nextSquares]),
-        xIsNext: !prevStatus.xIsNext,
-        stepNumber: prevStatus.stepNumber + 1,
-      };
-    });
+    stepNumber: 0
   };
 
-  const calculateWinner = (squares: Array<string | null>): string | null => {
-    const lines = [
-      [0, 1, 2],
-      [3, 4, 5],
-      [6, 7, 8],
-      [0, 3, 6],
-      [1, 4, 7],
-      [2, 5, 8],
-      [0, 4, 8],
-      [2, 4, 6],
-    ];
-    for (let i = 0; i < lines.length; i++) {
-      const [a, b, c] = lines[i];
-      if (
-        squares[a] &&
-        squares[a] === squares[b] &&
-        squares[a] === squares[c]
-      ) {
-        return squares[a];
-      }
-    }
-    return null;
-  };
-
-  const jumpTo = (step: number) => {
-    setGameStatus((prev) => {
-      return {
-        ...prev,
-        stepNumber: step,
-        xIsNext: step % 2 === 0 ? true : false,
-      };
-    });
-  };
+  const [gameStatus, gameDispatch] = useReducer(gameReducer, gameStateTypeInit);
 
   const calcStatus = (): string => {
     const currentSquares = gameStatus.history[gameStatus.history.length - 1];
@@ -133,7 +147,13 @@ const Game = () => {
     const desc = idx ? `Go to move #${idx}` : "Go to game start";
     return (
       <li key={idx}>
-        <button onClick={() => jumpTo(idx)}>{desc}</button>
+        <button
+          onClick={() =>
+            gameDispatch({ type: ActionTypeType.ROLLBACKCLICK, data: idx })
+          }
+        >
+          {desc}
+        </button>
       </li>
     );
   });
@@ -141,10 +161,9 @@ const Game = () => {
   return (
     <div className="game">
       <div className="game-board">
-        <Board
-          squares={gameStatus.history[gameStatus.stepNumber]}
-          handleClick={handleClick}
-        />
+        <GameDispatchContext.Provider value={gameDispatch}>
+          <Board squares={gameStatus.history[gameStatus.stepNumber]} />
+        </GameDispatchContext.Provider>
       </div>
       <div className="game-info">
         <div>{calcStatus()}</div>
@@ -156,9 +175,4 @@ const Game = () => {
 
 // ========================================
 
-ReactDOM.render(
-  <ContextProvider>
-    <Counter></Counter>
-  </ContextProvider>,
-  document.getElementById("root")
-);
+ReactDOM.render(<Game></Game>, document.getElementById("root"));
